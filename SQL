@@ -1,0 +1,29 @@
+-- Users table to store information about each user and their role
+CREATE TABLE Users (
+    userID SERIAL PRIMARY KEY,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    role VARCHAR(50) NOT NULL CHECK (role IN ('student', 'faculty', 'guest')),
+    stripeCustomerID VARCHAR(255) UNIQUE,
+    createdAt TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Vehicles table linked to users
+CREATE TABLE Vehicles (
+    vehicleID SERIAL PRIMARY KEY,
+    userID INT NOT NULL REFERENCES Users(userID),
+    licensePlate VARCHAR(50) UNIQUE NOT NULL,
+    status VARCHAR(50) NOT NULL CHECK (status IN ('registered', 'unregistered')),
+    createdAt TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ParkingSessions table to track each parking event
+CREATE TABLE ParkingSessions (
+    sessionID SERIAL PRIMARY KEY,
+    vehicleID INT NOT NULL REFERENCES Vehicles(vehicleID),
+    slotID VARCHAR(50) NOT NULL,
+    startTime TIMESTAMP WITH TIME ZONE NOT NULL,
+    endTime TIMESTAMP WITH TIME ZONE,
+    isOvertimeBilled BOOLEAN DEFAULT FALSE,
+    totalCharge DECIMAL(10, 2) DEFAULT 0.00
+);
