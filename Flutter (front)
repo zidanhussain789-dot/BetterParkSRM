@@ -1,0 +1,61 @@
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+
+class ParkingScreen extends StatefulWidget {
+  @override
+  _ParkingScreenState createState() => _ParkingScreenState();
+}
+
+class _ParkingScreenState extends State<ParkingScreen> {
+  String _parkingStatus = "Tap to find a parking spot";
+
+  Future<void> _requestParkingSpot() async {
+    setState(() {
+      _parkingStatus = "Finding a spot...";
+    });
+
+    // Replace with your actual server URL and user/vehicle IDs
+    final url = Uri.parse('http://your-server-ip:3000/api/park');
+    final response = await http.post(
+      url,
+      headers: {'Content-Type': 'application/json'},
+      body: json.encode({
+        'userId': 'current_user_id', // Get this from user auth state
+        'vehicleId': 'current_vehicle_id', // Get this from user's selected vehicle
+      }),
+    );
+
+    if (response.statusCode == 200) {
+      final responseData = json.decode(response.body);
+      final assignedSlot = responseData['session']['slotID'];
+      setState(() {
+        _parkingStatus = "Spot assigned: $assignedSlot. Proceed to park.";
+      });
+    } else {
+      setState(() {
+        _parkingStatus = "Sorry, no spots are available right now.";
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text("Smart Parking")),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(_parkingStatus, style: TextStyle(fontSize: 22)),
+            SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: _requestParkingSpot,
+              child: Text("Request Parking Spot"),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
