@@ -1,29 +1,112 @@
--- Users table to store information about each user and their role
-CREATE TABLE Users (
-    userID SERIAL PRIMARY KEY,
-    email VARCHAR(255) UNIQUE NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
-    role VARCHAR(50) NOT NULL CHECK (role IN ('student', 'faculty', 'guest')),
-    stripeCustomerID VARCHAR(255) UNIQUE,
-    createdAt TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+CREATE TABLE public.profiles (
+  id bigint primary key generated always as identity,
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  email text UNIQUE NOT NULL,
+  role text NOT NULL CHECK (role IN ('student','faculty','guest')),
+  stripe_customer_id text UNIQUE,
+  created_at timestamp with time zone DEFAULT now()
 );
 
--- Vehicles table linked to users
-CREATE TABLE Vehicles (
-    vehicleID SERIAL PRIMARY KEY,
-    userID INT NOT NULL REFERENCES Users(userID),
-    licensePlate VARCHAR(50) UNIQUE NOT NULL,
-    status VARCHAR(50) NOT NULL CHECK (status IN ('registered', 'unregistered')),
-    createdAt TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+-- Enable RLS and note: you'll need to add policies below
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+
+-- 2) Vehicles - belongs to profile (use bigint FK to profiles.id)
+CREATE TABLE public.vehicles (
+  id bigint primary key generated always as identity,
+  profile_id bigint NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  license_plate text UNIQUE NOT NULL,
+  status text NOT NULL CHECK (status IN ('registered','unregistered')),
+  created_at timestamp with time zone DEFAULT now()
 );
 
--- ParkingSessions table to track each parking event
-CREATE TABLE ParkingSessions (
-    sessionID SERIAL PRIMARY KEY,
-    vehicleID INT NOT NULL REFERENCES Vehicles(vehicleID),
-    slotID VARCHAR(50) NOT NULL,
-    startTime TIMESTAMP WITH TIME ZONE NOT NULL,
-    endTime TIMESTAMP WITH TIME ZONE,
-    isOvertimeBilled BOOLEAN DEFAULT FALSE,
-    totalCharge DECIMAL(10, 2) DEFAULT 0.00
+-- Index to speed joins/filters on FK and license lookups
+CREATE INDEX idx_vehicles_profile_id ON public.vehicles(profile_id);
+CREATE INDEX idx_vehicles_license_plate ON public.vehicles(license_plate);
+
+ALTER TABLE public.vehicles ENABLE ROW LEVEL SECURITY;
+
+-- 3) Parking sessions
+CREATE TABLE public.parking_sessions (
+  id bigint primary key generated always as identity,
+  vehicle_id bigint NOT NULL REFERENCES public.vehicles(id) ON DELETE CASCADE,
+  slot_id text NOT NULL,
+  start_time timestamp with time zone NOT NULL,
+  end_time timestamp with time zone,
+  is_overtime_billed boolean DEFAULT false,
+  total_charge numeric(10,2) DEFAULT 0.00,
+  created_at timestamp with time zone DEFAULT now()
 );
+
+-- Indexes to support common queries: by vehicle and time range, and by slot
+CREATE INDEX idx_parking_sessions_vehicle_time ON public.parking_sessions(vehicle_id, start_time);
+CREATE INDEX idx_parking_sessions_slot ON public.parking_sessions(slot_id);
+
+ALTER TABLE public.parking_sessions ENABLE ROW LEVEL SECURITY;
+
+-- Sample RLS policies (adjust role targets & logic to your needs)
+
+-- Profiles: user only sees/edits their own profile
+CREATE POLICY "Profiles select own" ON public.profiles
+  FOR SELECT
+  TO authenticated
+  USING ((SELECT auth.uid()) = user_id);
+
+CREATE POLICY "Profiles insert own" ON public.profiles
+  FOR INSERT
+  TO authenticated
+  WITH CHECK ((SELECT auth.uid()) = user_id);
+
+CREATE POLICY "Profiles update own" ON public.profiles
+  FOR UPDATE
+  TO authenticated
+  USING ((SELECT auth.uid()) = user_id)
+  WITH CHECK ((SELECT auth.uid()) = user_id);
+
+CREATE POLICY "Profiles delete own" ON public.profiles
+  FOR DELETE
+  TO authenticated
+  USING ((SELECT auth.uid()) = user_id);
+
+-- Vehicles: profile owner can manage vehicles
+CREATE POLICY "Vehicles select by owner" ON public.vehicles
+  FOR SELECT
+  TO authenticated
+  USING (profile_id IN (SELECT id FROM public.profiles WHERE user_id = (SELECT auth.uid())));
+
+CREATE POLICY "Vehicles insert by owner" ON public.vehicles
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (profile_id IN (SELECT id FROM public.profiles WHERE user_id = (SELECT auth.uid())));
+
+CREATE POLICY "Vehicles update by owner" ON public.vehicles
+  FOR UPDATE
+  TO authenticated
+  USING (profile_id IN (SELECT id FROM public.profiles WHERE user_id = (SELECT auth.uid())))
+  WITH CHECK (profile_id IN (SELECT id FROM public.profiles WHERE user_id = (SELECT auth.uid())));
+
+CREATE POLICY "Vehicles delete by owner" ON public.vehicles
+  FOR DELETE
+  TO authenticated
+  USING (profile_id IN (SELECT id FROM public.profiles WHERE user_id = (SELECT auth.uid())));
+
+-- Parking sessions: owner (via vehicle -> profile) can view/manage
+CREATE POLICY "Parking select by owner" ON public.parking_sessions
+  FOR SELECT
+  TO authenticated
+  USING (vehicle_id IN (SELECT id FROM public.vehicles v WHERE v.profile_id IN (SELECT id FROM public.profiles WHERE user_id = (SELECT auth.uid()))));
+
+CREATE POLICY "Parking insert by owner" ON public.parking_sessions
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (vehicle_id IN (SELECT id FROM public.vehicles v WHERE v.profile_id IN (SELECT id FROM public.profiles WHERE user_id = (SELECT auth.uid()))));
+
+CREATE POLICY "Parking update by owner" ON public.parking_sessions
+  FOR UPDATE
+  TO authenticated
+  USING (vehicle_id IN (SELECT id FROM public.vehicles v WHERE v.profile_id IN (SELECT id FROM public.profiles WHERE user_id = (SELECT auth.uid()))))
+  WITH CHECK (vehicle_id IN (SELECT id FROM public.vehicles v WHERE v.profile_id IN (SELECT id FROM public.profiles WHERE user_id = (SELECT auth.uid()))));
+
+CREATE POLICY "Parking delete by owner" ON public.parking_sessions
+  FOR DELETE
+  TO authenticated
+  USING (vehicle_id IN (SELECT id FROM public.vehicles v WHERE v.profile_id IN (SELECT id FROM public.profiles WHERE user_id = (SELECT auth.uid()))));
